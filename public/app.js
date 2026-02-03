@@ -176,8 +176,11 @@ function renderInfo() {
   elements.deckInfo.textContent = String(currentState.deckCount);
   elements.discardInfo.textContent = String(currentState.discardCount);
 
-  const role = currentState.youId === currentState.attackerId ? "Attacking" : "Defending";
-  elements.statusText.textContent = `${role}`;
+  let role = currentState.youId === currentState.attackerId ? "Attacking" : "Defending";
+  if (currentState.phase === "taking") {
+    role = currentState.youId === currentState.attackerId ? "Opponent Taking" : "Taking Cards";
+  }
+  elements.statusText.textContent = role;
 }
 
 function renderPlayerRow(container, player, isYou) {
@@ -243,7 +246,7 @@ function renderTable() {
     pileEl.appendChild(attackCardEl);
 
     if (pile.defense) {
-      const defenseCardEl = createCardElement(pile.defense, false);
+      const defenseCardEl = createCardElement(pile.defense, true);
       defenseCardEl.classList.add("defense");
       defenseCardEl.style.zIndex = "2";
       pileEl.appendChild(defenseCardEl);
@@ -286,7 +289,11 @@ function renderActions() {
   elements.btnEnd.disabled = !hints.canEndTurn;
 
   elements.btnTake.textContent = hints.canTake ? "Take Cards" : "Take";
-  elements.btnEnd.textContent = hints.canEndTurn ? "Finish Turn" : "End Turn";
+  if (currentState.phase === "taking" && currentState.youId === currentState.attackerId) {
+    elements.btnEnd.textContent = "Finish Take";
+  } else {
+    elements.btnEnd.textContent = hints.canEndTurn ? "Finish Turn" : "End Turn";
+  }
 
   const hintText = buildActionHint(hints);
   elements.actionHint.textContent = hintText;
@@ -401,6 +408,13 @@ function sortHand(hand, trumpSuit) {
 }
 
 function buildActionHint(hints) {
+  if (currentState.phase === "taking") {
+    if (currentState.youId === currentState.attackerId) {
+      return "Defender is taking. Drag cards to add more or finish the take.";
+    }
+    return "You are taking cards. Wait for the attacker to finish.";
+  }
+
   if (currentState.youId === currentState.attackerId) {
     if (hints.canAttack) {
       return "Drag a card to the table or click it to attack.";
@@ -480,6 +494,7 @@ function handlePointerDown(event, card, cardEl) {
     return;
   }
 
+  event.preventDefault();
   selectedCardId = card.id;
   renderTable();
   renderHand();

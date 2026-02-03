@@ -67,6 +67,8 @@ function createRoom(roomId, settings) {
     trumpSuit: null,
     table: { piles: [] },
     discard: [],
+    phase: "attacking",
+    roundLimit: null,
     attackerId: null,
     defenderId: null,
     result: null
@@ -80,6 +82,8 @@ function resetRoom(room) {
   room.trumpSuit = null;
   room.table = { piles: [] };
   room.discard = [];
+  room.phase = "attacking";
+  room.roundLimit = null;
   room.attackerId = null;
   room.defenderId = null;
   room.result = null;
@@ -143,6 +147,8 @@ function startGame(room) {
   room.table = { piles: [] };
   room.discard = [];
   room.result = null;
+  room.phase = "attacking";
+  room.roundLimit = null;
 
   dealInitialHands(room);
 
@@ -158,6 +164,21 @@ function ranksOnTable(room) {
     if (pile.defense) ranks.add(pile.defense.rank);
   }
   return ranks;
+}
+
+function getMaxPairs(room) {
+  return room.discard.length === 0 ? 5 : 6;
+}
+
+function getAttackLimit(room) {
+  const maxPairs = getMaxPairs(room);
+  if (room.roundLimit !== null) {
+    return Math.min(room.roundLimit, maxPairs);
+  }
+
+  const defender = findPlayer(room, room.defenderId);
+  const defenderLimit = defender ? defender.hand.length : 0;
+  return Math.min(defenderLimit, maxPairs);
 }
 
 function canBeat(attackCard, defenseCard, trumpSuit) {
@@ -218,28 +239,41 @@ function computeActionHints(room, player) {
   const tableHasAttacks = piles.length > 0;
   const allDefended = tableHasAttacks && piles.every((pile) => pile.defense);
   const anyUndefended = piles.some((pile) => !pile.defense);
-  const defender = findPlayer(room, room.defenderId);
-  const defenderHandCount = defender ? defender.hand.length : 0;
   const ranks = ranksOnTable(room);
+  const attackLimit = getAttackLimit(room);
+
+  const hasAttackCard = tableHasAttacks
+    ? player.hand.some((card) => ranks.has(card.rank))
+    : player.hand.length > 0;
 
   const canAttack =
     room.status === "playing" &&
     isAttacker &&
-    (!tableHasAttacks || allDefended) &&
-    piles.length < defenderHandCount;
+    (room.phase === "attacking" || room.phase === "taking") &&
+    piles.length < attackLimit &&
+    hasAttackCard;
 
-  const canEndTurn = room.status === "playing" && isAttacker && allDefended && tableHasAttacks;
-  const canTake = room.status === "playing" && isDefender && anyUndefended;
+  const canEndTurn =
+    room.status === "playing" &&
+    isAttacker &&
+    tableHasAttacks &&
+    ((room.phase === "attacking" && allDefended) || room.phase === "taking");
+
+  const canTake =
+    room.status === "playing" && isDefender && room.phase === "attacking" && anyUndefended;
 
   const canTransfer =
     room.status === "playing" &&
     isDefender &&
+    room.phase === "attacking" &&
     room.settings.perevod &&
     tableHasAttacks &&
     piles.every((pile) => !pile.defense) &&
+    piles.length < attackLimit &&
     player.hand.some((card) => ranks.has(card.rank));
 
-  const canDefend = room.status === "playing" && isDefender && anyUndefended;
+  const canDefend =
+    room.status === "playing" && isDefender && room.phase === "attacking" && anyUndefended;
 
   return { canAttack, canEndTurn, canTake, canTransfer, canDefend };
 }
@@ -264,6 +298,8 @@ function buildStateForPlayer(room, player) {
     trumpCard: room.trumpCard,
     trumpSuit: room.trumpSuit,
     discardCount: room.discard.length,
+    phase: room.phase,
+    attackLimit: getAttackLimit(room),
     actionHints: computeActionHints(room, player),
     result: room.result
   };
@@ -383,16 +419,15 @@ wss.on("connection", (socket) => {
         return;
       }
 
-      const piles = currentRoom.table.piles;
-      const tableHasAttacks = piles.length > 0;
-      const allDefended = tableHasAttacks && piles.every((pile) => pile.defense);
-      const ranks = ranksOnTable(currentRoom);
-
-      if (tableHasAttacks && !allDefended) {
+      if (currentRoom.phase !== "attacking" && currentRoom.phase !== "taking") {
         player.hand.push(card);
-        sendError(socket, "Wait for the defense before attacking again.");
+        sendError(socket, "You cannot attack right now.");
         return;
       }
+
+      const piles = currentRoom.table.piles;
+      const tableHasAttacks = piles.length > 0;
+      const ranks = ranksOnTable(currentRoom);
 
       if (tableHasAttacks && !ranks.has(card.rank)) {
         player.hand.push(card);
@@ -400,9 +435,14 @@ wss.on("connection", (socket) => {
         return;
       }
 
-      if (defender && piles.length >= defender.hand.length) {
+      if (!tableHasAttacks && defender && currentRoom.roundLimit === null) {
+        currentRoom.roundLimit = defender.hand.length;
+      }
+
+      const attackLimit = getAttackLimit(currentRoom);
+      if (piles.length >= attackLimit) {
         player.hand.push(card);
-        sendError(socket, "Defender has no room for more attacks.");
+        sendError(socket, "No more attacks allowed this round.");
         return;
       }
 
@@ -412,6 +452,11 @@ wss.on("connection", (socket) => {
     }
 
     if (message.type === "play_defense") {
+      if (currentRoom.phase !== "attacking") {
+        sendError(socket, "Defense is not allowed now.");
+        return;
+      }
+
       const pile = currentRoom.table.piles.find((entry) => entry.id === message.pileId);
       if (!pile || pile.defense) {
         sendError(socket, "That attack is already defended.");
@@ -446,6 +491,11 @@ wss.on("connection", (socket) => {
         return;
       }
 
+      if (currentRoom.phase !== "attacking") {
+        sendError(socket, "Transfers are not allowed now.");
+        return;
+      }
+
       if (player.id !== currentRoom.defenderId) {
         sendError(socket, "Only the defender can transfer.");
         return;
@@ -469,11 +519,23 @@ wss.on("connection", (socket) => {
         return;
       }
 
+      const incomingDefenderId = currentRoom.attackerId;
+      const incomingDefender = findPlayer(currentRoom, incomingDefenderId);
+      const maxPairs = getMaxPairs(currentRoom);
+      const newLimit = Math.min(incomingDefender ? incomingDefender.hand.length : 0, maxPairs);
+
+      if (currentRoom.table.piles.length >= newLimit) {
+        player.hand.push(transferCard);
+        sendError(socket, "No more attacks allowed for the next defender.");
+        return;
+      }
+
       currentRoom.table.piles.push({ id: generateId(8), attack: transferCard, defense: null });
 
       const previousAttacker = currentRoom.attackerId;
       currentRoom.attackerId = currentRoom.defenderId;
       currentRoom.defenderId = previousAttacker;
+      currentRoom.roundLimit = newLimit;
 
       broadcastState(currentRoom);
       return;
@@ -490,15 +552,16 @@ wss.on("connection", (socket) => {
         return;
       }
 
-      const cards = collectTableCards(currentRoom);
-      player.hand.push(...cards);
-      currentRoom.table.piles = [];
+      if (currentRoom.phase === "taking") {
+        sendError(socket, "You have already chosen to take.");
+        return;
+      }
 
-      const attackerId = currentRoom.attackerId;
-      const defenderId = currentRoom.defenderId;
-      drawToSix(currentRoom, [attackerId, defenderId]);
+      currentRoom.phase = "taking";
+      if (currentRoom.roundLimit === null) {
+        currentRoom.roundLimit = player.hand.length;
+      }
 
-      checkGameEnd(currentRoom);
       broadcastState(currentRoom);
       return;
     }
@@ -510,7 +573,34 @@ wss.on("connection", (socket) => {
       }
 
       const piles = currentRoom.table.piles;
-      if (piles.length === 0 || piles.some((pile) => !pile.defense)) {
+      if (piles.length === 0) {
+        sendError(socket, "There are no cards on the table.");
+        return;
+      }
+
+      if (currentRoom.phase === "taking") {
+        const defender = findPlayer(currentRoom, currentRoom.defenderId);
+        if (!defender) {
+          sendError(socket, "Defender not found.");
+          return;
+        }
+
+        defender.hand.push(...collectTableCards(currentRoom));
+        currentRoom.table.piles = [];
+
+        const attackerId = currentRoom.attackerId;
+        const defenderId = currentRoom.defenderId;
+        drawToSix(currentRoom, [attackerId, defenderId]);
+
+        currentRoom.phase = "attacking";
+        currentRoom.roundLimit = null;
+
+        checkGameEnd(currentRoom);
+        broadcastState(currentRoom);
+        return;
+      }
+
+      if (piles.some((pile) => !pile.defense)) {
         sendError(socket, "All attacks must be defended before ending the turn.");
         return;
       }
@@ -524,6 +614,8 @@ wss.on("connection", (socket) => {
 
       currentRoom.attackerId = oldDefender;
       currentRoom.defenderId = oldAttacker;
+      currentRoom.phase = "attacking";
+      currentRoom.roundLimit = null;
 
       checkGameEnd(currentRoom);
       broadcastState(currentRoom);

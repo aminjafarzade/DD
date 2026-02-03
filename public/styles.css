@@ -280,6 +280,8 @@ button:not(:disabled):active {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .table {
@@ -288,6 +290,8 @@ button:not(:disabled):active {
   gap: 14px;
   align-items: center;
   min-height: 140px;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .pile {
@@ -375,6 +379,8 @@ button:not(:disabled):active {
 .playing-card.selectable {
   touch-action: none;
   cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .drag-ghost {
@@ -443,6 +449,8 @@ button:not(:disabled):active {
   flex-wrap: wrap;
   gap: 12px;
   padding: 12px 6px;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .player-row {
