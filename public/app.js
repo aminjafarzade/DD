@@ -229,15 +229,12 @@ function renderTable() {
   currentState.table.piles.forEach((pile) => {
     const pileEl = document.createElement("div");
     pileEl.className = "pile";
+    pileEl.dataset.pileId = pile.id;
 
     const attackCardEl = createCardElement(pile.attack, true);
     attackCardEl.style.zIndex = "1";
     attackCardEl.dataset.pileId = pile.id;
     attackCardEl.classList.add("attack-card");
-
-    if (selectedCard && canDefend && canBeat(pile.attack, selectedCard, currentState.trumpSuit)) {
-      attackCardEl.classList.add("target");
-    }
 
     attackCardEl.addEventListener("click", () => {
       handleDefenseAttempt(pile);
@@ -317,6 +314,7 @@ function handleHandCardClick(card) {
     renderTable();
     renderHand();
     renderActions();
+    updateDragPreview(card);
   }
 }
 
@@ -442,42 +440,61 @@ function buildActionHint(hints) {
 function updateDragPreview(card) {
   if (!currentState || !card) return;
 
+  clearDragPreview();
+
   const hints = currentState.actionHints;
   const canTransfer =
     hints.canTransfer && currentState.table.piles.some((pile) => pile.attack.rank === card.rank);
   const canAttack = hints.canAttack;
 
-  elements.table.classList.toggle("drag-over", canAttack || canTransfer);
-  elements.table.classList.toggle("drag-transfer", canTransfer);
+  if (hints.canDefend) {
+    applyDefenseTargets(card);
+  }
 
-  applyDefenseTargets(card);
+  if (canAttack || canTransfer) {
+    applyTablePreview({ canAttack, canTransfer });
+  }
 }
 
 function clearDragPreview() {
-  elements.table.classList.remove("drag-over");
-  elements.table.classList.remove("drag-transfer");
+  elements.table.querySelectorAll(".preview-pile").forEach((node) => node.remove());
+  elements.table.querySelectorAll(".preview-card").forEach((node) => node.remove());
   clearDefenseTargets();
 }
 
 function applyDefenseTargets(card) {
-  const attackCards = elements.table.querySelectorAll(".attack-card");
-  attackCards.forEach((attackEl) => {
-    const pileId = attackEl.dataset.pileId;
+  const piles = elements.table.querySelectorAll(".pile");
+  piles.forEach((pileEl) => {
+    const pileId = pileEl.dataset.pileId;
+    if (!pileId) return;
     const pile = currentState.table.piles.find((entry) => entry.id === pileId);
-    if (!pile) {
-      attackEl.classList.remove("drop-target");
-      return;
-    }
+    if (!pile || pile.defense) return;
 
     const canDefend =
       currentState.actionHints.canDefend && canBeat(pile.attack, card, currentState.trumpSuit);
-    attackEl.classList.toggle("drop-target", canDefend);
+    if (!canDefend) return;
+
+    const preview = document.createElement("div");
+    preview.className = "preview-card defense-preview";
+    pileEl.appendChild(preview);
   });
 }
 
 function clearDefenseTargets() {
-  const attackCards = elements.table.querySelectorAll(".attack-card.drop-target");
-  attackCards.forEach((attackEl) => attackEl.classList.remove("drop-target"));
+  const previews = elements.table.querySelectorAll(".preview-card.defense-preview");
+  previews.forEach((preview) => preview.remove());
+}
+
+function applyTablePreview({ canAttack, canTransfer }) {
+  const previewPile = document.createElement("div");
+  previewPile.className = "pile preview-pile";
+  const previewCard = document.createElement("div");
+  previewCard.className = "preview-card attack-preview";
+  if (canTransfer && !canAttack) {
+    previewCard.classList.add("transfer-preview");
+  }
+  previewPile.appendChild(previewCard);
+  elements.table.appendChild(previewPile);
 }
 
 function handlePointerDown(event, card, cardEl) {
