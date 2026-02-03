@@ -41,6 +41,8 @@ let socket = null;
 let currentState = null;
 let selectedCardId = null;
 let draggingCardId = null;
+let pointerDrag = null;
+let lastDragTime = 0;
 
 function showScreen(screen) {
   const screens = [elements.screenHome, elements.screenLobby, elements.screenGame, elements.screenFinished];
@@ -238,30 +240,6 @@ function renderTable() {
       handleDefenseAttempt(pile);
     });
 
-    attackCardEl.addEventListener("dragover", (event) => {
-      const dragged = getDraggedCard(event);
-      if (!dragged) return;
-      if (!currentState.actionHints.canDefend) return;
-      if (!canBeat(pile.attack, dragged, currentState.trumpSuit)) return;
-      event.preventDefault();
-      event.stopPropagation();
-      attackCardEl.classList.add("drop-target");
-    });
-
-    attackCardEl.addEventListener("dragleave", () => {
-      attackCardEl.classList.remove("drop-target");
-    });
-
-    attackCardEl.addEventListener("drop", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      attackCardEl.classList.remove("drop-target");
-      const dragged = getDraggedCard(event);
-      if (!dragged) return;
-      sendMessage("play_defense", { pileId: pile.id, cardId: dragged.id });
-      selectedCardId = null;
-    });
-
     pileEl.appendChild(attackCardEl);
 
     if (pile.defense) {
@@ -288,36 +266,14 @@ function renderHand() {
   yourHand.forEach((card) => {
     const cardEl = createCardElement(card, true);
     cardEl.classList.add("selectable");
-    cardEl.setAttribute("draggable", "true");
-    cardEl.draggable = true;
 
     if (card.id === selectedCardId) {
       cardEl.classList.add("selected");
     }
 
     cardEl.addEventListener("click", () => handleHandCardClick(card));
-    cardEl.addEventListener("dragstart", (event) => {
-      draggingCardId = card.id;
-      selectedCardId = card.id;
-      renderTable();
-      renderHand();
-      renderActions();
-      updateDragPreview(card);
-      if (event.dataTransfer) {
-        event.dataTransfer.setData("text/plain", card.id);
-        event.dataTransfer.effectAllowed = "move";
-      }
-      cardEl.classList.add("dragging");
-    });
-
-    cardEl.addEventListener("dragend", () => {
-      draggingCardId = null;
-      cardEl.classList.remove("dragging");
-      elements.table.classList.remove("drag-over");
-      elements.table.classList.remove("drag-transfer");
-      selectedCardId = null;
-      renderTable();
-      renderActions();
+    cardEl.addEventListener("pointerdown", (event) => {
+      handlePointerDown(event, card, cardEl);
     });
     elements.hand.appendChild(cardEl);
   });
@@ -337,6 +293,10 @@ function renderActions() {
 }
 
 function handleHandCardClick(card) {
+  if (Date.now() - lastDragTime < 200) {
+    return;
+  }
+
   const hints = currentState.actionHints;
 
   if (hints.canAttack && currentState.youId === currentState.attackerId) {
@@ -425,14 +385,6 @@ function canBeat(attackCard, defenseCard, trumpSuit) {
   return false;
 }
 
-function getDraggedCard(event) {
-  if (!currentState) return null;
-  const cardId = event && event.dataTransfer ? event.dataTransfer.getData("text/plain") : null;
-  const resolvedId = cardId || draggingCardId || selectedCardId;
-  if (!resolvedId) return null;
-  return currentState.yourHand.find((card) => card.id === resolvedId) || null;
-}
-
 function sortHand(hand, trumpSuit) {
   const suitOrder = ["spades", "hearts", "diamonds", "clubs"];
   return [...hand].sort((a, b) => {
@@ -483,6 +435,211 @@ function updateDragPreview(card) {
 
   elements.table.classList.toggle("drag-over", canAttack || canTransfer);
   elements.table.classList.toggle("drag-transfer", canTransfer);
+
+  applyDefenseTargets(card);
+}
+
+function clearDragPreview() {
+  elements.table.classList.remove("drag-over");
+  elements.table.classList.remove("drag-transfer");
+  clearDefenseTargets();
+}
+
+function applyDefenseTargets(card) {
+  const attackCards = elements.table.querySelectorAll(".attack-card");
+  attackCards.forEach((attackEl) => {
+    const pileId = attackEl.dataset.pileId;
+    const pile = currentState.table.piles.find((entry) => entry.id === pileId);
+    if (!pile) {
+      attackEl.classList.remove("drop-target");
+      return;
+    }
+
+    const canDefend =
+      currentState.actionHints.canDefend && canBeat(pile.attack, card, currentState.trumpSuit);
+    attackEl.classList.toggle("drop-target", canDefend);
+  });
+}
+
+function clearDefenseTargets() {
+  const attackCards = elements.table.querySelectorAll(".attack-card.drop-target");
+  attackCards.forEach((attackEl) => attackEl.classList.remove("drop-target"));
+}
+
+function handlePointerDown(event, card, cardEl) {
+  if (!currentState) return;
+  if (event.button !== undefined && event.button !== 0) return;
+
+  const hints = currentState.actionHints;
+  const canTransfer =
+    hints.canTransfer && currentState.table.piles.some((pile) => pile.attack.rank === card.rank);
+  const canDefend = hints.canDefend && currentState.table.piles.some((pile) => canBeat(pile.attack, card, currentState.trumpSuit));
+  const canAttack = hints.canAttack;
+
+  if (!canAttack && !canDefend && !canTransfer) {
+    return;
+  }
+
+  selectedCardId = card.id;
+  renderTable();
+  renderHand();
+  renderActions();
+
+  pointerDrag = {
+    active: false,
+    pointerId: event.pointerId,
+    card,
+    cardEl,
+    startX: event.clientX,
+    startY: event.clientY,
+    canTransfer,
+    canDefend,
+    canAttack,
+    ghost: null
+  };
+
+  try {
+    cardEl.setPointerCapture(event.pointerId);
+  } catch (error) {
+    // Pointer capture may not be supported on all devices.
+  }
+  document.addEventListener("pointermove", handlePointerMove);
+  document.addEventListener("pointerup", handlePointerUp);
+  document.addEventListener("pointercancel", handlePointerCancel);
+}
+
+function handlePointerMove(event) {
+  if (!pointerDrag || event.pointerId !== pointerDrag.pointerId) return;
+
+  const dx = event.clientX - pointerDrag.startX;
+  const dy = event.clientY - pointerDrag.startY;
+  const distance = Math.hypot(dx, dy);
+
+  if (!pointerDrag.active && distance < 6) {
+    return;
+  }
+
+  if (!pointerDrag.active) {
+    event.preventDefault();
+    pointerDrag.active = true;
+    draggingCardId = pointerDrag.card.id;
+    selectedCardId = pointerDrag.card.id;
+    pointerDrag.cardEl.classList.add("dragging");
+    createGhost(pointerDrag.card, event);
+    updateDragPreview(pointerDrag.card);
+  }
+
+  if (pointerDrag.ghost) {
+    pointerDrag.ghost.style.left = `${event.clientX}px`;
+    pointerDrag.ghost.style.top = `${event.clientY}px`;
+  }
+}
+
+function handlePointerUp(event) {
+  if (!pointerDrag || event.pointerId !== pointerDrag.pointerId) return;
+
+  document.removeEventListener("pointermove", handlePointerMove);
+  document.removeEventListener("pointerup", handlePointerUp);
+  document.removeEventListener("pointercancel", handlePointerCancel);
+
+  const wasDragging = pointerDrag.active;
+  const card = pointerDrag.card;
+  const hints = currentState.actionHints;
+
+  if (pointerDrag.cardEl) {
+    pointerDrag.cardEl.classList.remove("dragging");
+  }
+
+  if (pointerDrag.ghost) {
+    pointerDrag.ghost.remove();
+  }
+
+  clearDragPreview();
+
+  pointerDrag = null;
+  draggingCardId = null;
+
+  if (!wasDragging) {
+    pointerDrag = null;
+    return;
+  }
+
+  lastDragTime = Date.now();
+
+  const target = document.elementFromPoint(event.clientX, event.clientY);
+  const attackEl = target ? target.closest(".attack-card") : null;
+
+  if (attackEl) {
+    const pileId = attackEl.dataset.pileId;
+    const pile = currentState.table.piles.find((entry) => entry.id === pileId);
+    if (pile && hints.canDefend && canBeat(pile.attack, card, currentState.trumpSuit)) {
+      sendMessage("play_defense", { pileId: pile.id, cardId: card.id });
+      selectedCardId = null;
+      renderTable();
+      renderHand();
+      renderActions();
+      return;
+    }
+  }
+
+  if (target && elements.table.contains(target)) {
+    const canTransfer =
+      hints.canTransfer && currentState.table.piles.some((pile) => pile.attack.rank === card.rank);
+
+    if (hints.canAttack) {
+      sendMessage("play_attack", { cardId: card.id });
+      selectedCardId = null;
+      renderTable();
+      renderHand();
+      renderActions();
+      return;
+    }
+
+    if (canTransfer) {
+      sendMessage("transfer", { cardId: card.id });
+      selectedCardId = null;
+      renderTable();
+      renderHand();
+      renderActions();
+      return;
+    }
+  }
+
+  showToast("Drop on the table to attack/transfer or on an attack card to defend.");
+  renderTable();
+  renderHand();
+  renderActions();
+}
+
+function createGhost(card, event) {
+  const ghost = createCardElement(card, true);
+  ghost.classList.add("drag-ghost");
+  ghost.style.left = `${event.clientX}px`;
+  ghost.style.top = `${event.clientY}px`;
+  document.body.appendChild(ghost);
+  pointerDrag.ghost = ghost;
+}
+
+function handlePointerCancel(event) {
+  if (!pointerDrag || event.pointerId !== pointerDrag.pointerId) return;
+  document.removeEventListener("pointermove", handlePointerMove);
+  document.removeEventListener("pointerup", handlePointerUp);
+  document.removeEventListener("pointercancel", handlePointerCancel);
+
+  if (pointerDrag.cardEl) {
+    pointerDrag.cardEl.classList.remove("dragging");
+  }
+
+  if (pointerDrag.ghost) {
+    pointerDrag.ghost.remove();
+  }
+
+  clearDragPreview();
+  pointerDrag = null;
+  draggingCardId = null;
+  renderTable();
+  renderHand();
+  renderActions();
 }
 
 async function createGame() {
@@ -541,75 +698,25 @@ elements.btnNew.addEventListener("click", () => {
   window.location.href = "/";
 });
 
-(function setupDragTargets() {
-  elements.table.addEventListener("dragover", (event) => {
-    const dragged = getDraggedCard(event);
-    if (!dragged) return;
+elements.table.addEventListener("click", () => {
+  const selectedCard = getSelectedCard();
+  if (!selectedCard || !currentState) return;
 
-    const hints = currentState ? currentState.actionHints : null;
-    if (!hints) return;
+  const hints = currentState.actionHints;
+  const canTransfer =
+    hints.canTransfer && currentState.table.piles.some((pile) => pile.attack.rank === selectedCard.rank);
 
-    const canTransfer =
-      hints.canTransfer && currentState.table.piles.some((pile) => pile.attack.rank === dragged.rank);
-    const canAttack = hints.canAttack;
+  if (hints.canAttack) {
+    sendMessage("play_attack", { cardId: selectedCard.id });
+    selectedCardId = null;
+    return;
+  }
 
-    if (!canAttack && !canTransfer) return;
-    event.preventDefault();
-    elements.table.classList.add("drag-over");
-    elements.table.classList.toggle("drag-transfer", canTransfer);
-  });
-
-  elements.table.addEventListener("dragleave", () => {
-    elements.table.classList.remove("drag-over");
-    elements.table.classList.remove("drag-transfer");
-  });
-
-  elements.table.addEventListener("drop", (event) => {
-    event.preventDefault();
-    elements.table.classList.remove("drag-over");
-    elements.table.classList.remove("drag-transfer");
-    const dragged = getDraggedCard(event);
-    if (!dragged || !currentState) return;
-
-    const hints = currentState.actionHints;
-    const canTransfer =
-      hints.canTransfer && currentState.table.piles.some((pile) => pile.attack.rank === dragged.rank);
-
-    if (hints.canAttack) {
-      sendMessage("play_attack", { cardId: dragged.id });
-      selectedCardId = null;
-      return;
-    }
-
-    if (canTransfer) {
-      sendMessage("transfer", { cardId: dragged.id });
-      selectedCardId = null;
-      return;
-    }
-
-    showToast("That card cannot be played there.");
-  });
-
-  elements.table.addEventListener("click", () => {
-    const selectedCard = getSelectedCard();
-    if (!selectedCard || !currentState) return;
-
-    const hints = currentState.actionHints;
-    const canTransfer =
-      hints.canTransfer && currentState.table.piles.some((pile) => pile.attack.rank === selectedCard.rank);
-
-    if (hints.canAttack) {
-      sendMessage("play_attack", { cardId: selectedCard.id });
-      selectedCardId = null;
-      return;
-    }
-
-    if (canTransfer) {
-      sendMessage("transfer", { cardId: selectedCard.id });
-      selectedCardId = null;
-    }
-  });
-})();
+  if (canTransfer) {
+    sendMessage("transfer", { cardId: selectedCard.id });
+    selectedCardId = null;
+  }
+});
 
 (function init() {
   const params = new URLSearchParams(window.location.search);

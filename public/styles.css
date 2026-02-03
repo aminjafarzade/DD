@@ -372,6 +372,22 @@ button:not(:disabled):active {
   transform: translateY(-8px) scale(1.02);
 }
 
+.playing-card.selectable {
+  touch-action: none;
+  cursor: grab;
+}
+
+.drag-ghost {
+  position: fixed;
+  z-index: 2000;
+  pointer-events: none;
+  transform: translate(-50%, -50%) rotate(-4deg) scale(1.02);
+}
+
+.playing-card.dragging {
+  cursor: grabbing;
+}
+
 .playing-card.selected {
   transform: translateY(-10px) scale(1.02);
   box-shadow: 0 22px 32px rgba(8, 12, 28, 0.4);
