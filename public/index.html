@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Durak Duel</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="app-header">
+        <div class="brand">
+          <span class="logo">Durak Duel</span>
+          <span class="badge">2 Player</span>
+        </div>
+        <div id="room-info" class="room-info"></div>
+      </header>
+
+      <main>
+        <section id="screen-home" class="screen active">
+          <div class="panel hero">
+            <div>
+              <h1>Play Durak Online</h1>
+              <p class="subtitle">Fast, elegant, and built for two players. Share a link, start instantly.</p>
+            </div>
+            <div class="panel-grid">
+              <div class="panel-card">
+                <h2>Create Game</h2>
+                <label class="field">
+                  <span>Your name</span>
+                  <input id="create-name" type="text" placeholder="Player 1" />
+                </label>
+                <label class="toggle">
+                  <input id="toggle-perevod" type="checkbox" checked />
+                  <span>Enable Perevod (Transfer)</span>
+                </label>
+                <button id="btn-create" class="primary">Create & Start</button>
+                <p class="hint">You can share the link after the room is created.</p>
+              </div>
+
+              <div class="panel-card">
+                <h2>Join Game</h2>
+                <label class="field">
+                  <span>Your name</span>
+                  <input id="join-name" type="text" placeholder="Player 2" />
+                </label>
+                <label class="field">
+                  <span>Room code</span>
+                  <input id="join-room" type="text" placeholder="ABC123" />
+                </label>
+                <button id="btn-join" class="secondary">Join</button>
+                <p class="hint">Paste the room code or open the shared link.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="screen-lobby" class="screen">
+          <div class="panel">
+            <h2>Waiting for your friend</h2>
+            <p class="subtitle">Share this link to start the match.</p>
+            <div class="share-row">
+              <input id="share-link" type="text" readonly />
+              <button id="btn-copy" class="secondary">Copy</button>
+            </div>
+            <div id="lobby-status" class="status-pill">Room created</div>
+          </div>
+        </section>
+
+        <section id="screen-game" class="screen">
+          <div class="game-top">
+            <div class="info-card">
+              <div class="label">Trump</div>
+              <div id="trump-info" class="value">-</div>
+            </div>
+            <div class="info-card">
+              <div class="label">Deck</div>
+              <div id="deck-info" class="value">0</div>
+            </div>
+            <div class="info-card">
+              <div class="label">Discard</div>
+              <div id="discard-info" class="value">0</div>
+            </div>
+            <div class="info-card status">
+              <div class="label">Status</div>
+              <div id="status-text" class="value">Waiting...</div>
+            </div>
+          </div>
+
+          <div class="table-zone">
+            <div class="player-row" id="opponent-row"></div>
+            <div id="table" class="table"></div>
+          </div>
+
+          <div class="action-bar">
+            <button id="btn-transfer" class="secondary">Transfer</button>
+            <button id="btn-take" class="secondary">Take</button>
+            <button id="btn-end" class="primary">End Turn</button>
+          </div>
+
+          <div class="player-row you" id="you-row"></div>
+          <div id="hand" class="hand"></div>
+        </section>
+
+        <section id="screen-finished" class="screen">
+          <div class="panel">
+            <h2 id="result-title">Game Over</h2>
+            <p id="result-subtitle" class="subtitle"></p>
+            <button id="btn-new" class="primary">Create New Game</button>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
