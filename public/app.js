@@ -44,9 +44,6 @@ let draggingCardId = null;
 let pointerDrag = null;
 let lastDragTime = 0;
 
-const DEFENSE_SNAP_DISTANCE = 140;
-const TABLE_SNAP_MARGIN = 100;
-
 function showScreen(screen) {
   const screens = [elements.screenHome, elements.screenLobby, elements.screenGame, elements.screenFinished];
   screens.forEach((el) => el.classList.remove("active"));
@@ -494,7 +491,6 @@ function applyTablePreview({ canAttack, canTransfer }) {
   previewPile.className = "pile preview-pile";
   const previewCard = document.createElement("div");
   previewCard.className = "preview-card attack-preview";
-  previewCard.dataset.previewType = canTransfer && !canAttack ? "transfer" : "attack";
   if (canTransfer && !canAttack) {
     previewCard.classList.add("transfer-preview");
   }
@@ -571,9 +567,6 @@ function handlePointerMove(event) {
     pointerDrag.ghost.style.top = `${event.clientY}px`;
   }
 
-  if (pointerDrag.active) {
-    updateDropIntent(event.clientX, event.clientY);
-  }
 }
 
 function handlePointerUp(event) {
@@ -605,48 +598,57 @@ function handlePointerUp(event) {
 
   lastDragTime = Date.now();
 
-  const intent = pointerDrag.intent;
-  pointerDrag = null;
-  draggingCardId = null;
+  const target = document.elementFromPoint(event.clientX, event.clientY);
+  const attackEl = target ? target.closest(".attack-card") : null;
 
-  if (intent && intent.type === "defense" && intent.pileId) {
-    const pile = currentState.table.piles.find((entry) => entry.id === intent.pileId);
+  if (attackEl) {
+    const pileId = attackEl.dataset.pileId;
+    const pile = currentState.table.piles.find((entry) => entry.id === pileId);
     if (pile && hints.canDefend && canBeat(pile.attack, card, currentState.trumpSuit)) {
       sendMessage("play_defense", { pileId: pile.id, cardId: card.id });
       selectedCardId = null;
       renderTable();
       renderHand();
       renderActions();
+      pointerDrag = null;
+      draggingCardId = null;
       return;
     }
   }
 
-  if (intent && intent.type === "attack" && hints.canAttack) {
-    sendMessage("play_attack", { cardId: card.id });
-    selectedCardId = null;
-    renderTable();
-    renderHand();
-    renderActions();
-    return;
-  }
-
-  if (intent && intent.type === "transfer") {
+  if (target && elements.table.contains(target)) {
     const canTransfer =
       hints.canTransfer && currentState.table.piles.some((pile) => pile.attack.rank === card.rank);
+
+    if (hints.canAttack) {
+      sendMessage("play_attack", { cardId: card.id });
+      selectedCardId = null;
+      renderTable();
+      renderHand();
+      renderActions();
+      pointerDrag = null;
+      draggingCardId = null;
+      return;
+    }
+
     if (canTransfer) {
       sendMessage("transfer", { cardId: card.id });
       selectedCardId = null;
       renderTable();
       renderHand();
       renderActions();
+      pointerDrag = null;
+      draggingCardId = null;
       return;
     }
   }
 
-  showToast("Drop near a pile to defend, or near the table to attack/transfer.");
+  showToast("Drop on the table to attack/transfer or on an attack card to defend.");
   renderTable();
   renderHand();
   renderActions();
+  pointerDrag = null;
+  draggingCardId = null;
 }
 
 function createGhost(card, event) {
@@ -680,76 +682,6 @@ function handlePointerCancel(event) {
   renderActions();
 }
 
-function updateDropIntent(x, y) {
-  if (!pointerDrag || !currentState) return;
-
-  const { card, canDefend, canAttack, canTransfer } = pointerDrag;
-  let intent = { type: null, pileId: null };
-
-  if (canDefend) {
-    let nearest = null;
-    let nearestDist = Infinity;
-    const pileElements = elements.table.querySelectorAll(".pile");
-
-    pileElements.forEach((pileEl) => {
-      const pileId = pileEl.dataset.pileId;
-      if (!pileId) return;
-      const pile = currentState.table.piles.find((entry) => entry.id === pileId);
-      if (!pile || pile.defense) return;
-      if (!canBeat(pile.attack, card, currentState.trumpSuit)) return;
-
-      const rect = pileEl.getBoundingClientRect();
-      const centerX = rect.left + rect.width / 2;
-      const centerY = rect.top + rect.height / 2;
-      const dist = Math.hypot(centerX - x, centerY - y);
-
-      if (dist < nearestDist) {
-        nearestDist = dist;
-        nearest = pileId;
-      }
-    });
-
-    if (nearest && nearestDist <= DEFENSE_SNAP_DISTANCE) {
-      intent = { type: "defense", pileId: nearest };
-    }
-  }
-
-  if (!intent.type && (canAttack || canTransfer)) {
-    const rect = elements.table.getBoundingClientRect();
-    const inside =
-      x >= rect.left - TABLE_SNAP_MARGIN &&
-      x <= rect.right + TABLE_SNAP_MARGIN &&
-      y >= rect.top - TABLE_SNAP_MARGIN &&
-      y <= rect.bottom + TABLE_SNAP_MARGIN;
-
-    if (inside) {
-      intent = { type: canAttack ? "attack" : "transfer", pileId: null };
-    }
-  }
-
-  pointerDrag.intent = intent;
-  applyPreviewIntent(intent);
-}
-
-function applyPreviewIntent(intent) {
-  const previews = elements.table.querySelectorAll(".preview-card");
-  previews.forEach((preview) => preview.classList.remove("preview-strong"));
-
-  if (!intent || !intent.type) return;
-
-  if (intent.type === "defense" && intent.pileId) {
-    const preview = elements.table.querySelector(
-      `.preview-card.defense-preview[data-pile-id="${intent.pileId}"]`
-    );
-    if (preview) preview.classList.add("preview-strong");
-    return;
-  }
-
-  if (intent.type === "attack" || intent.type === "transfer") {
-    const preview = elements.table.querySelector(".preview-card.attack-preview");
-    if (preview) preview.classList.add("preview-strong");
-  }
-}
 
 async function createGame() {
   const perevod = elements.togglePerevod.checked;
