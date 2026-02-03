@@ -297,7 +297,7 @@ button:not(:disabled):active {
 }
 
 .playing-card {
-  position: absolute;
+  position: relative;
   width: 92px;
   height: 130px;
   border-radius: 16px;
@@ -310,6 +310,10 @@ button:not(:disabled):active {
   box-shadow: 0 14px 28px rgba(4, 6, 18, 0.3);
   border: 1px solid rgba(0, 0, 0, 0.08);
   transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.pile .playing-card {
+  position: absolute;
 }
 
 .playing-card.red {
@@ -358,6 +362,15 @@ button:not(:disabled):active {
 .playing-card.target {
   outline: 2px solid var(--accent);
   box-shadow: 0 0 0 4px rgba(255, 179, 107, 0.25);
+}
+
+.playing-card.drop-target {
+  outline: 2px dashed var(--accent);
+  box-shadow: 0 0 0 4px rgba(255, 179, 107, 0.2);
+}
+
+.table.drag-over {
+  box-shadow: 0 0 0 3px rgba(255, 143, 61, 0.35);
 }
 
 .pile .defense {

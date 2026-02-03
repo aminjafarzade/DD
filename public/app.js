@@ -236,6 +236,30 @@ function renderTable() {
       handleDefenseAttempt(pile);
     });
 
+    attackCardEl.addEventListener("dragover", (event) => {
+      const dragged = getDraggedCard(event);
+      if (!dragged) return;
+      if (!currentState.actionHints.canDefend) return;
+      if (!canBeat(pile.attack, dragged, currentState.trumpSuit)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      attackCardEl.classList.add("drop-target");
+    });
+
+    attackCardEl.addEventListener("dragleave", () => {
+      attackCardEl.classList.remove("drop-target");
+    });
+
+    attackCardEl.addEventListener("drop", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      attackCardEl.classList.remove("drop-target");
+      const dragged = getDraggedCard(event);
+      if (!dragged) return;
+      sendMessage("play_defense", { pileId: pile.id, cardId: dragged.id });
+      selectedCardId = null;
+    });
+
     pileEl.appendChild(attackCardEl);
 
     if (pile.defense) {
@@ -262,12 +286,23 @@ function renderHand() {
   yourHand.forEach((card) => {
     const cardEl = createCardElement(card, true);
     cardEl.classList.add("selectable");
+    cardEl.setAttribute("draggable", "true");
 
     if (card.id === selectedCardId) {
       cardEl.classList.add("selected");
     }
 
     cardEl.addEventListener("click", () => handleHandCardClick(card));
+    cardEl.addEventListener("dragstart", (event) => {
+      event.dataTransfer.setData("text/plain", card.id);
+      event.dataTransfer.effectAllowed = "move";
+      cardEl.classList.add("dragging");
+    });
+
+    cardEl.addEventListener("dragend", () => {
+      cardEl.classList.remove("dragging");
+      elements.table.classList.remove("drag-over");
+    });
     elements.hand.appendChild(cardEl);
   });
 }
@@ -374,6 +409,13 @@ function canBeat(attackCard, defenseCard, trumpSuit) {
   return false;
 }
 
+function getDraggedCard(event) {
+  if (!currentState || !event.dataTransfer) return null;
+  const cardId = event.dataTransfer.getData("text/plain");
+  if (!cardId) return null;
+  return currentState.yourHand.find((card) => card.id === cardId) || null;
+}
+
 async function createGame() {
   const perevod = elements.togglePerevod.checked;
   const response = await fetch("/api/create", {
@@ -436,6 +478,53 @@ elements.btnEnd.addEventListener("click", () => {
 elements.btnNew.addEventListener("click", () => {
   window.location.href = "/";
 });
+
+(function setupDragTargets() {
+  elements.table.addEventListener("dragover", (event) => {
+    const dragged = getDraggedCard(event);
+    if (!dragged) return;
+
+    const hints = currentState ? currentState.actionHints : null;
+    if (!hints) return;
+
+    const canTransfer =
+      hints.canTransfer && currentState.table.piles.some((pile) => pile.attack.rank === dragged.rank);
+    const canAttack = hints.canAttack;
+
+    if (!canAttack && !canTransfer) return;
+    event.preventDefault();
+    elements.table.classList.add("drag-over");
+  });
+
+  elements.table.addEventListener("dragleave", () => {
+    elements.table.classList.remove("drag-over");
+  });
+
+  elements.table.addEventListener("drop", (event) => {
+    event.preventDefault();
+    elements.table.classList.remove("drag-over");
+    const dragged = getDraggedCard(event);
+    if (!dragged || !currentState) return;
+
+    const hints = currentState.actionHints;
+    const canTransfer =
+      hints.canTransfer && currentState.table.piles.some((pile) => pile.attack.rank === dragged.rank);
+
+    if (hints.canAttack) {
+      sendMessage("play_attack", { cardId: dragged.id });
+      selectedCardId = null;
+      return;
+    }
+
+    if (canTransfer) {
+      sendMessage("transfer", { cardId: dragged.id });
+      selectedCardId = null;
+      return;
+    }
+
+    showToast("That card cannot be played there.");
+  });
+})();
 
 (function init() {
   const params = new URLSearchParams(window.location.search);
