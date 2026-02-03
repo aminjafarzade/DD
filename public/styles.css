@@ -304,8 +304,8 @@ button:not(:disabled):active {
   background: linear-gradient(165deg, #f7f9ff, #e1e7ff);
   color: #1a1f3a;
   display: flex;
-  flex-direction: column;
-  justify-content: space-between;
+  align-items: center;
+  justify-content: center;
   padding: 10px;
   box-shadow: 0 14px 28px rgba(4, 6, 18, 0.3);
   border: 1px solid rgba(0, 0, 0, 0.08);
@@ -335,9 +335,22 @@ button:not(:disabled):active {
 }
 
 .playing-card .corner {
+  position: absolute;
   display: flex;
   flex-direction: column;
   gap: 2px;
+  font-weight: 700;
+}
+
+.playing-card .corner-top {
+  top: 8px;
+  left: 8px;
+}
+
+.playing-card .corner-bottom {
+  bottom: 8px;
+  right: 8px;
+  transform: rotate(180deg);
 }
 
 .playing-card.back {
@@ -352,6 +365,11 @@ button:not(:disabled):active {
 .playing-card.selectable:hover {
   transform: translateY(-6px) rotate(-1deg);
   box-shadow: 0 20px 30px rgba(8, 12, 28, 0.35);
+}
+
+.playing-card.dragging {
+  opacity: 0.7;
+  transform: translateY(-8px) scale(1.02);
 }
 
 .playing-card.selected {
@@ -373,9 +391,20 @@ button:not(:disabled):active {
   box-shadow: 0 0 0 3px rgba(255, 143, 61, 0.35);
 }
 
+.table.drag-transfer {
+  box-shadow: 0 0 0 3px rgba(255, 143, 61, 0.35);
+  background: rgba(255, 179, 107, 0.1);
+  border-radius: 16px;
+}
+
 .pile .defense {
-  top: 18px;
-  left: 18px;
+  top: 16px;
+  left: 16px;
+  transform: rotate(8deg);
+}
+
+.pile .attack-card {
+  transform: rotate(-2deg);
 }
 
 .action-bar {
@@ -383,6 +412,14 @@ button:not(:disabled):active {
   gap: 12px;
   margin: 18px 0;
   flex-wrap: wrap;
+  align-items: center;
+}
+
+.action-hint {
+  color: var(--muted);
+  font-size: 13px;
+  flex: 1;
+  min-width: 220px;
 }
 
 .hand {

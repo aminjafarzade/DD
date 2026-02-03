@@ -20,9 +20,9 @@ const elements = {
   hand: document.getElementById("hand"),
   opponentRow: document.getElementById("opponent-row"),
   youRow: document.getElementById("you-row"),
-  btnTransfer: document.getElementById("btn-transfer"),
   btnTake: document.getElementById("btn-take"),
   btnEnd: document.getElementById("btn-end"),
+  actionHint: document.getElementById("action-hint"),
   btnNew: document.getElementById("btn-new"),
   resultTitle: document.getElementById("result-title"),
   resultSubtitle: document.getElementById("result-subtitle"),
@@ -40,6 +40,7 @@ const SUIT_SYMBOL = {
 let socket = null;
 let currentState = null;
 let selectedCardId = null;
+let draggingCardId = null;
 
 function showScreen(screen) {
   const screens = [elements.screenHome, elements.screenLobby, elements.screenGame, elements.screenFinished];
@@ -227,6 +228,7 @@ function renderTable() {
     const attackCardEl = createCardElement(pile.attack, true);
     attackCardEl.style.zIndex = "1";
     attackCardEl.dataset.pileId = pile.id;
+    attackCardEl.classList.add("attack-card");
 
     if (selectedCard && canDefend && canBeat(pile.attack, selectedCard, currentState.trumpSuit)) {
       attackCardEl.classList.add("target");
@@ -278,8 +280,8 @@ function renderHand() {
 
   if (!currentState) return;
 
-  const yourHand = currentState.yourHand;
-  if (!yourHand.find((card) => card.id === selectedCardId)) {
+  const yourHand = sortHand(currentState.yourHand, currentState.trumpSuit);
+  if (!currentState.yourHand.find((card) => card.id === selectedCardId)) {
     selectedCardId = null;
   }
 
@@ -287,6 +289,7 @@ function renderHand() {
     const cardEl = createCardElement(card, true);
     cardEl.classList.add("selectable");
     cardEl.setAttribute("draggable", "true");
+    cardEl.draggable = true;
 
     if (card.id === selectedCardId) {
       cardEl.classList.add("selected");
@@ -294,14 +297,27 @@ function renderHand() {
 
     cardEl.addEventListener("click", () => handleHandCardClick(card));
     cardEl.addEventListener("dragstart", (event) => {
-      event.dataTransfer.setData("text/plain", card.id);
-      event.dataTransfer.effectAllowed = "move";
+      draggingCardId = card.id;
+      selectedCardId = card.id;
+      renderTable();
+      renderHand();
+      renderActions();
+      updateDragPreview(card);
+      if (event.dataTransfer) {
+        event.dataTransfer.setData("text/plain", card.id);
+        event.dataTransfer.effectAllowed = "move";
+      }
       cardEl.classList.add("dragging");
     });
 
     cardEl.addEventListener("dragend", () => {
+      draggingCardId = null;
       cardEl.classList.remove("dragging");
       elements.table.classList.remove("drag-over");
+      elements.table.classList.remove("drag-transfer");
+      selectedCardId = null;
+      renderTable();
+      renderActions();
     });
     elements.hand.appendChild(cardEl);
   });
@@ -309,16 +325,15 @@ function renderHand() {
 
 function renderActions() {
   const hints = currentState.actionHints;
-  const selectedCard = getSelectedCard();
 
-  const transferEnabled =
-    hints.canTransfer &&
-    selectedCard &&
-    currentState.table.piles.some((pile) => pile.attack.rank === selectedCard.rank);
-
-  elements.btnTransfer.disabled = !transferEnabled;
   elements.btnTake.disabled = !hints.canTake;
   elements.btnEnd.disabled = !hints.canEndTurn;
+
+  elements.btnTake.textContent = hints.canTake ? "Take Cards" : "Take";
+  elements.btnEnd.textContent = hints.canEndTurn ? "Finish Turn" : "End Turn";
+
+  const hintText = buildActionHint(hints);
+  elements.actionHint.textContent = hintText;
 }
 
 function handleHandCardClick(card) {
@@ -369,7 +384,7 @@ function createCardElement(card, showDetails) {
   }
 
   const corner = document.createElement("div");
-  corner.className = "corner";
+  corner.className = "corner corner-top";
 
   const rank = document.createElement("div");
   rank.className = "rank";
@@ -383,7 +398,8 @@ function createCardElement(card, showDetails) {
   corner.appendChild(suit);
 
   const cornerBottom = corner.cloneNode(true);
-  cornerBottom.style.transform = "rotate(180deg)";
+  cornerBottom.classList.remove("corner-top");
+  cornerBottom.classList.add("corner-bottom");
 
   cardEl.appendChild(corner);
   cardEl.appendChild(cornerBottom);
@@ -410,10 +426,63 @@ function canBeat(attackCard, defenseCard, trumpSuit) {
 }
 
 function getDraggedCard(event) {
-  if (!currentState || !event.dataTransfer) return null;
-  const cardId = event.dataTransfer.getData("text/plain");
-  if (!cardId) return null;
-  return currentState.yourHand.find((card) => card.id === cardId) || null;
+  if (!currentState) return null;
+  const cardId = event && event.dataTransfer ? event.dataTransfer.getData("text/plain") : null;
+  const resolvedId = cardId || draggingCardId || selectedCardId;
+  if (!resolvedId) return null;
+  return currentState.yourHand.find((card) => card.id === resolvedId) || null;
+}
+
+function sortHand(hand, trumpSuit) {
+  const suitOrder = ["spades", "hearts", "diamonds", "clubs"];
+  return [...hand].sort((a, b) => {
+    const aTrump = a.suit === trumpSuit;
+    const bTrump = b.suit === trumpSuit;
+    if (aTrump !== bTrump) return aTrump ? -1 : 1;
+
+    if (a.suit !== b.suit) {
+      return suitOrder.indexOf(a.suit) - suitOrder.indexOf(b.suit);
+    }
+
+    return b.value - a.value;
+  });
+}
+
+function buildActionHint(hints) {
+  if (currentState.youId === currentState.attackerId) {
+    if (hints.canAttack) {
+      return "Drag a card to the table or click it to attack.";
+    }
+    if (hints.canEndTurn) {
+      return "All attacks defended. Finish the turn.";
+    }
+  }
+
+  if (currentState.youId === currentState.defenderId) {
+    if (hints.canDefend && hints.canTransfer) {
+      return "Drag a matching rank to transfer or drag onto an attack to defend.";
+    }
+    if (hints.canDefend) {
+      return "Drag a card onto an attack to defend.";
+    }
+    if (hints.canTake) {
+      return "Take the cards if you cannot defend.";
+    }
+  }
+
+  return "";
+}
+
+function updateDragPreview(card) {
+  if (!currentState || !card) return;
+
+  const hints = currentState.actionHints;
+  const canTransfer =
+    hints.canTransfer && currentState.table.piles.some((pile) => pile.attack.rank === card.rank);
+  const canAttack = hints.canAttack;
+
+  elements.table.classList.toggle("drag-over", canAttack || canTransfer);
+  elements.table.classList.toggle("drag-transfer", canTransfer);
 }
 
 async function createGame() {
@@ -460,13 +529,6 @@ elements.btnCopy.addEventListener("click", () => {
   });
 });
 
-elements.btnTransfer.addEventListener("click", () => {
-  const selectedCard = getSelectedCard();
-  if (!selectedCard) return;
-  sendMessage("transfer", { cardId: selectedCard.id });
-  selectedCardId = null;
-});
-
 elements.btnTake.addEventListener("click", () => {
   sendMessage("take");
 });
@@ -494,15 +556,18 @@ elements.btnNew.addEventListener("click", () => {
     if (!canAttack && !canTransfer) return;
     event.preventDefault();
     elements.table.classList.add("drag-over");
+    elements.table.classList.toggle("drag-transfer", canTransfer);
   });
 
   elements.table.addEventListener("dragleave", () => {
     elements.table.classList.remove("drag-over");
+    elements.table.classList.remove("drag-transfer");
   });
 
   elements.table.addEventListener("drop", (event) => {
     event.preventDefault();
     elements.table.classList.remove("drag-over");
+    elements.table.classList.remove("drag-transfer");
     const dragged = getDraggedCard(event);
     if (!dragged || !currentState) return;
 
@@ -523,6 +588,26 @@ elements.btnNew.addEventListener("click", () => {
     }
 
     showToast("That card cannot be played there.");
+  });
+
+  elements.table.addEventListener("click", () => {
+    const selectedCard = getSelectedCard();
+    if (!selectedCard || !currentState) return;
+
+    const hints = currentState.actionHints;
+    const canTransfer =
+      hints.canTransfer && currentState.table.piles.some((pile) => pile.attack.rank === selectedCard.rank);
+
+    if (hints.canAttack) {
+      sendMessage("play_attack", { cardId: selectedCard.id });
+      selectedCardId = null;
+      return;
+    }
+
+    if (canTransfer) {
+      sendMessage("transfer", { cardId: selectedCard.id });
+      selectedCardId = null;
+    }
   });
 })();
 
